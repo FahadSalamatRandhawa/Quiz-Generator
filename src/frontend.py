@@ -5,6 +5,10 @@ from io import BytesIO
 import PyPDF2
 from uuid import uuid4
 
+st.set_page_config(
+    page_title="Make My Quiz",
+    page_icon="📝",
+)
 
 # Assuming 'file_id' is the unique identifier for the uploaded file
 if 'file_id' not in st.session_state:
