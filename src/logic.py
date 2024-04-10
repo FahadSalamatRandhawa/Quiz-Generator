@@ -66,7 +66,7 @@ response_format_withoutanswer={
 TEMPLATE = """
 You are an expert MCQ maker, your job is to create {number} {question_type} type questions with {complexity} complexity on the topic "{topic}", once questions are created check each 
 MCQ for mistakes and ensure that no question is repeated and every MCQ has a correct option and the correct answer, if you find any mistake, you will correct it, and then check again until there is no mistake.
-
+Randomize the correct answer location in options
 Additional Instructions to follow : {instructions}.
 Use this information to create the MCQ's : {context}
 
