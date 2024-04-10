@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from dotenv import load_dotenv,find_dotenv
 from Model__Embedding_HuggingFace import HuggingFaceEmbeddingsModel
+import PyPDF2
 
 _:bool=load_dotenv(find_dotenv())
 
@@ -120,11 +121,11 @@ def getQuiz(topic:str, number:int, question_type:str, complexity:str, context:st
 
 def jsonToDataFrame(j_format):
     print("Converting to dataframe")
-    for key, value in j_format.items():
-        if isinstance(value, dict):  # Check if value is a dictionary
-            for k, v in value.items():
-                if isinstance(v, dict):  # Check if v is a dictionary
-                    value[k] = json.dumps(v)
+    # for key, value in j_format.items():
+    #     if isinstance(value, dict):  # Check if value is a dictionary
+    #         for k, v in value.items():
+    #             if isinstance(v, dict):  # Check if v is a dictionary
+    #                 value[k] = json.dumps(v)
         
         # row = value
         # row['options'] = json.dumps(value['options'])  # Convert options to a JSON string
@@ -135,13 +136,12 @@ def jsonToDataFrame(j_format):
 
 def fromPDFToTextAndEmbeddings(file):
     embedding_model=HuggingFaceEmbeddingsModel()
-    print("Getting embeddings")
+    print("Getting embeddings ...")
     DocPages=[]
-    print(file.pages)
     for page_num in range(len(file.pages)):
         page = file.pages[page_num]
         DocPages.append(page.extract_text())
-    print("----------------------------------------------------------------------------\n")
+    print(f"-----------------------Extracted {len(DocPages)} from pdf-----------------------------------\n")
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     splitter=RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=20)
     textChunksArray=splitter.split_text("".join(DocPages))
