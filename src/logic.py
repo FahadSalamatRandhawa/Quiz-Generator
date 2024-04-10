@@ -90,7 +90,7 @@ review_chain=LLMChain(llm=llm, prompt=review_prompt, verbose=True, output_key="r
 
 sequence_chain=SequentialChain(chains=[quiz_chain, review_chain], input_variables=["topic", "number", "question_type", "complexity","context","instructions","response_format"], output_variables=["review"] , verbose=True)
 
-def getSeperateKeyQuiz(topic:str, number:int, question_type:str, complexity:str, context:str, instructions, answer_key):
+def getQuiz(topic:str, number:int, question_type:str, complexity:str, context:str, instructions, answer_key):
     try:
         print("Generating quiz ....")
         responseformat=json.dumps(response_format_withoutanswer) if answer_key=="Seperate" else json.dumps(response_format_withanswer)
@@ -98,7 +98,6 @@ def getSeperateKeyQuiz(topic:str, number:int, question_type:str, complexity:str,
         quiz_chain=LLMChain(llm=llm,prompt=quiz_prompt,verbose=True,output_key="quiz")
         quiz=quiz_chain.run(topic=topic, number=number, question_type=question_type, complexity=complexity, context=context, instructions=instructions,response_format=responseformat)
         print("Quiz generated successfully")
-        print(quiz)
 
         return json.loads(quiz.strip('`'))
     except Exception as e:
@@ -106,25 +105,24 @@ def getSeperateKeyQuiz(topic:str, number:int, question_type:str, complexity:str,
         print(traceback.format_exc())
         return None
 
-def getQuiz(topic:str,number:int,question_type:str,complexity:str,context:str,instructions,answer_key):
-    print(("Generating quiz ..."))
-    review=sequence_chain.run(topic, number, question_type, complexity, context, 
-    instructions, response_format=json.dumps(response_format_withoutanswer) if answer_key=="Seperate" else json.dumps(response_format_withanswer))
-    review = review.strip('`')
-    j_format=json.loads(review)
+# def getQuiz(topic:str,number:int,question_type:str,complexity:str,context:str,instructions,answer_key):
+#     print(("Generating quiz ..."))
+#     review=sequence_chain.run(topic, number, question_type, complexity, context, 
+#     instructions, response_format=json.dumps(response_format_withoutanswer) if answer_key=="Seperate" else json.dumps(response_format_withanswer))
+#     review = review.strip('`')
+#     j_format=json.loads(review)
 
-    print("Quiz generated successfully\n")
-    return j_format
+#     print("Quiz generated successfully\n")
+#     return j_format
 
 
 def jsonToDataFrame(j_format):
     print("Converting to dataframe")
-    data_list = {}
     for key, value in j_format.items():
-        data_list[key] = []
-        for k,v in value.items():
-            if type(v)==dict or json:
-                value[k]=json.dumps(v)
+        if isinstance(value, dict):  # Check if value is a dictionary
+            for k, v in value.items():
+                if isinstance(v, dict):  # Check if v is a dictionary
+                    value[k] = json.dumps(v)
         
         # row = value
         # row['options'] = json.dumps(value['options'])  # Convert options to a JSON string
@@ -133,42 +131,107 @@ def jsonToDataFrame(j_format):
     print("Dataframe converted successfully")
     return quiz_dataframe
 
-def fromPDFToDocsAndEmbeddings(file):
+def fromPDFToTextAndEmbeddings(file):
     embedding_model=HuggingFaceEmbeddingsModel()
     print("Getting embeddings")
-    textArray=[]; 
+    DocPages=[]
     print(file.pages)
     for page_num in range(len(file.pages)):
         page = file.pages[page_num]
-        print(page.extract_text())
-        textArray.append(page.extract_text())
+        DocPages.append(page.extract_text())
     print("----------------------------------------------------------------------------\n")
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     splitter=RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=20)
-    docs=splitter.create_documents(textArray)
-    print("Doc splitted : ", len(docs))
-    embeddingsArray=[embedding_model.get_embedding(doc.page_content) for doc in docs]
+    textChunksArray=splitter.split_text("".join(DocPages))
+    print("Doc splitted into : ", len(textChunksArray))
+
+    textWithEmbeddings=[]
+    for text in textChunksArray:
+        embedding=embedding_model.get_embedding(text)
+        textWithEmbeddings.append({'text':text,'embedding':embedding})
+    # embeddingsArray=[embedding_model.get_embedding(doc.page_content) for doc in docs]
     print("Embeddings generated successfully")
 
-    return docs,embeddingsArray
+    # return docs,embeddingsArray
+    return textWithEmbeddings
 
-def uploadToMongoDbAtlas(docs,embeddings):
+def similarity_search(query:str,textWithEmbeddings:list,threshold=0.4):
+    import numpy as np
+
+    print("Calculating similarity .....\n")
+    embedding_model=HuggingFaceEmbeddingsModel()
+    queryVector=embedding_model.get_embedding(query)
+    query2DVector=np.reshape(queryVector,(1,-1))
+    print('query vector generated')
+
+    from sklearn.metrics.pairwise import cosine_similarity
+    relevantDocs=[]
+
+    for item in textWithEmbeddings:
+        doc2DVector=np.reshape(item['embedding'], (1, -1))
+        similarity = cosine_similarity(query2DVector, doc2DVector)
+        if similarity > threshold:
+            relevantDocs.append(item['text'])
+            print("text with similarity>{threshold} found ..")
+    
+    print("Similarity search complete, returning relevant texts array ....")
+
+    return relevantDocs
+
+
+def uploadToMongoDbAtlas(docs,embeddings,file_id):
     print("Uploading to Atlas")
     from pymongo import MongoClient
+    from datetime import datetime, timedelta
+
     client=MongoClient(os.getenv("MONGODBATLAS_CONNECTION_STRING"))
     collection=client["quiz_creation"]["temporary_storage"]
-    collection.create_index("expiry", expireAfterSeconds=3600)
+    collection.create_index("expiry", expireAfterSeconds=120)
     print("Connected to Atlas at ,",collection)
     new_docs = []
     for doc, embedding in zip(docs, embeddings):
         # Create a new document with the original document and its embedding
         print("Creating new doc")
         new_doc = {
-            "original_doc": doc.page_content,
-            "embedding": embedding 
+            "file_id":file_id,
+            "text": doc.page_content,
+            "embedding": embedding ,
+            "expiry":datetime.utcnow()
         }
         new_docs.append(new_doc)
 
     collection.insert_many(new_docs)
     print("Uploaded to Atlas successfully")
+    return True
+
+def vector_search(query,file_ids):
+    print("Seraching for query in files : ")
+    from pymongo import MongoClient
+    client=MongoClient(os.getenv("MONGODBATLAS_CONNECTION_STRING"))
+    collection=client["quiz_creation"]["temporary_storage"]
+
+    embedding_model=HuggingFaceEmbeddingsModel()
+    query_embedding=embedding_model.get_embedding(query)
+    query = [
+        {"$vectorSearch": {
+            "index": "default",
+            "path":"embeddings",
+            "queryVector":query_embedding,
+            "limit":10000
+            }
+        },
+        {"$match": {
+                "file_id": {
+                    "$in": file_ids
+                }
+            }}
+    ]
+
+    documents = collection.aggregate(query)
+
+    for doc in documents:
+        print(doc)
+
+    print("Vector search successful")
+
     return True
