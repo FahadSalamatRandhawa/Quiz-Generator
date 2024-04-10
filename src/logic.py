@@ -12,8 +12,6 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain, SequentialChain
 import os
 
-llm = ChatGoogleGenerativeAI(model="gemini-1.0-pro",google_api_key=os.getenv("GEMINIULTRA_API_KEY"),temperature=0.2)
-
 response_format_withanswer={
     "1":{
         "question":"question text",
@@ -78,26 +76,30 @@ quiz_prompt=PromptTemplate(
     input_variables=["topic","number","question_type","complexity","context","instructions","response_format"],
     template=TEMPLATE
 )
-quiz_chain=LLMChain(llm=llm,prompt=quiz_prompt,verbose=True,output_key="quiz")
+# quiz_chain=LLMChain(llm=llm,prompt=quiz_prompt,verbose=True,output_key="quiz")
 # mcqs=quiz_chain.run(topic="python", number=10, question_type="True False Unsure", complexity="medium", context="user your own knowledge", instructions="a question can have more than 1 answer,don't provide the answer with the questions, provide asnwers seperately", response_format=response_format)
 
 
 REVIEW_TEMPLATE = """
-You are an expert MCQ reviewer, your job is to review {number} {question_type} type questions with {complexity} complexity on the topic "{topic}", If you find any incorrect question or options or answer, update it properly, quiz:{quiz}. The output must be the same format as quiz input"""
+You are an expert MCQ reviewer, your job is to review {number} {question_type} type questions with {complexity} complexity on the topic "{topic}", If you find any incorrect question or options or answer, update it properly, {quiz}. The output must be the same format as input"""
 review_prompt=PromptTemplate(input_variables=["topic","number","question_type","complexity","quiz"], template=REVIEW_TEMPLATE)
-review_chain=LLMChain(llm=llm, prompt=review_prompt, verbose=True, output_key="review")
 
+def getQuiz(topic:str, number:int, question_type:str, complexity:str, context:str, instructions, answer_key,temperature:float):
+    llm = ChatGoogleGenerativeAI(model="gemini-1.0-pro",google_api_key=os.getenv("GEMINIULTRA_API_KEY"),temperature=temperature)
 
-sequence_chain=SequentialChain(chains=[quiz_chain, review_chain], input_variables=["topic", "number", "question_type", "complexity","context","instructions","response_format"], output_variables=["review"] , verbose=True)
-
-def getQuiz(topic:str, number:int, question_type:str, complexity:str, context:str, instructions, answer_key):
     try:
         print("Generating quiz ....")
         responseformat=json.dumps(response_format_withoutanswer) if answer_key=="Seperate" else json.dumps(response_format_withanswer)
         print("response_format : ",responseformat,"\n")
         quiz_chain=LLMChain(llm=llm,prompt=quiz_prompt,verbose=True,output_key="quiz")
-        quiz=quiz_chain.run(topic=topic, number=number, question_type=question_type, complexity=complexity, context=context, instructions=instructions,response_format=responseformat)
+        # quiz=quiz_chain.run(topic=topic, number=number, question_type=question_type, complexity=complexity, context=context, instructions=instructions,response_format=responseformat)
+        
+
+        review_chain=LLMChain(llm=llm, prompt=review_prompt, verbose=True, output_key="review")
+        sequence_chain=SequentialChain(chains=[quiz_chain, review_chain], input_variables=["topic", "number", "question_type", "complexity","context","instructions","response_format"], output_variables=["review"] , verbose=True)
+        quiz=sequence_chain.run(topic=topic, number=number, question_type=question_type, complexity=complexity, context=context, instructions=instructions,response_format=responseformat)
         print("Quiz generated successfully")
+        print(quiz)
 
         return json.loads(quiz.strip('`'))
     except Exception as e:
